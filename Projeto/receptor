@@ -1,0 +1,207 @@
+/*
+ * PROJETO COMUNICAÇÃO DE DADOS - ARDUINO RECEPTOR
+ * Codificação: NRZ-L (Non-Return-to-Zero-Level)
+ * Universidade Tecnológica Federal do Paraná (UTFPR)
+ * 
+ * NRZ-L: bit 0 = nível BAIXO (LED apagado) | bit 1 = nível ALTO (LED aceso)
+ */
+
+// ===== DEFINIÇÕES DE PINOS E CONSTANTES =====
+#define LIGHT_SENSOR_PIN A0     // Pino analógico do sensor de luz (A0)
+#define BIT_DURATION 250        // Duração de cada bit em milissegundos
+#define SAMPLING_INTERVAL 50    // Intervalo de amostragem do sensor
+#define MAX_MESSAGE_LENGTH 64   // Máximo de caracteres esperados
+
+// ===== CALIBRAÇÃO DO SENSOR =====
+// Você precisará ajustar esses valores baseado na leitura do seu sensor
+#define LIGHT_THRESHOLD 500     // Valor limiar para distinguir 0 (baixo) e 1 (alto)
+                                // Valores < THRESHOLD = bit 0
+                                // Valores >= THRESHOLD = bit 1
+
+// ===== VARIÁVEIS GLOBAIS =====
+String receivedMessage = "";    // Mensagem recebida
+boolean isReceiving = false;    // Flag para indicar se está recebendo
+
+// ===== SETUP - Executado uma única vez no início =====
+void setup() {
+  // Inicializa comunicação serial (para exibição de dados)
+  Serial.begin(9600);
+  
+  // Configura o pino do sensor como entrada
+  pinMode(LIGHT_SENSOR_PIN, INPUT);
+  
+  // Mensagem de boas-vindas
+  Serial.println("===== ARDUINO RECEPTOR - NRZ-L =====");
+  Serial.println("Aguardando transmissão...");
+  Serial.println("====================================\n");
+  
+  // Inicia a calibração do sensor
+  calibrateSensor();
+}
+
+// ===== LOOP - Executado continuamente =====
+void loop() {
+  // Verifica se há mudança de luz (início de transmissão)
+  int sensorValue = analogRead(LIGHT_SENSOR_PIN);
+  
+  // Se há atividade no sensor, começa a receber
+  if (sensorValue >= LIGHT_THRESHOLD && !isReceiving) {
+    Serial.println("\n*** DETECTADA TRANSMISSÃO INICIADA ***\n");
+    isReceiving = true;
+    receivedMessage = "";
+  }
+  
+  // Se está recebendo, processa cada caractere
+  if (isReceiving) {
+    char receivedChar = receiveCharacter();
+    
+    if (receivedChar != '\0') {  // '\0' significa que ainda está aguardando dados
+      receivedMessage += receivedChar;
+      Serial.print("Caractere recebido: '");
+      Serial.print(receivedChar);
+      Serial.print("' (ASCII: ");
+      Serial.print((int)receivedChar);
+      Serial.println(")");
+    }
+    
+    // Verifica se terminou a transmissão (sem mudança de luz)
+    if (isTransmissionComplete()) {
+      Serial.println("\n===== TRANSMISSÃO CONCLUÍDA =====");
+      Serial.print("Mensagem recebida: ");
+      Serial.println(receivedMessage);
+      Serial.println("Aguardando próxima transmissão...\n");
+      isReceiving = false;
+      receivedMessage = "";
+    }
+  }
+}
+
+// ===== FUNÇÃO: CALIBRAÇÃO DO SENSOR =====
+void calibrateSensor() {
+  Serial.println("--- CALIBRAÇÃO DO SENSOR ---");
+  Serial.println("Lendo valores do sensor de luz...");
+  
+  int minValue = 1023;
+  int maxValue = 0;
+  
+  // Coleta amostras por 3 segundos
+  for (int i = 0; i < 30; i++) {
+    int value = analogRead(LIGHT_SENSOR_PIN);
+    minValue = min(minValue, value);
+    maxValue = max(maxValue, value);
+    delay(100);
+  }
+  
+  Serial.print("Valor mínimo lido: ");
+  Serial.println(minValue);
+  Serial.print("Valor máximo lido: ");
+  Serial.println(maxValue);
+  Serial.print("Limiar atual (LIGHT_THRESHOLD): ");
+  Serial.println(LIGHT_THRESHOLD);
+  Serial.println("Se os valores não forem bem separados,");
+  Serial.println("ajuste o valor de LIGHT_THRESHOLD no código.\n");
+}
+
+// ===== FUNÇÃO: RECEBER UM CARACTERE (8 BITS) =====
+char receiveCharacter() {
+  byte receivedByte = 0;  // Armazena os 8 bits do caractere
+  
+  // Recebe 8 bits
+  for (int bit = 7; bit >= 0; bit--) {
+    int bitValue = receiveBit();
+    
+    if (bitValue != -1) {  // -1 indica erro
+      // Posiciona o bit no lugar correto dentro do byte
+      receivedByte |= (bitValue << bit);
+      Serial.print(bitValue);
+    }
+    else {
+      return '\0';  // Retorna nulo se houver erro
+    }
+  }
+  
+  Serial.println();  // Nova linha após os 8 bits
+  return (char)receivedByte;
+}
+
+// ===== FUNÇÃO: RECEBER UM BIT =====
+// Retorna: 0 ou 1 se bem-sucedido, -1 se erro
+int receiveBit() {
+  int sampleCount = 0;
+  int highCount = 0;
+  
+  // Amostra o sensor durante todo o tempo de duração do bit
+  long startTime = millis();
+  
+  while (millis() - startTime < BIT_DURATION) {
+    int sensorValue = analogRead(LIGHT_SENSOR_PIN);
+    
+    // Conta amostras altas (luz detectada)
+    if (sensorValue >= LIGHT_THRESHOLD) {
+      highCount++;
+    }
+    
+    sampleCount++;
+    
+    // Aguarda o intervalo de amostragem
+    delay(SAMPLING_INTERVAL);
+  }
+  
+  // Decide se o bit é 0 ou 1 baseado na maioria das amostras
+  if (highCount > sampleCount / 2) {
+    // Maioria de amostras altas = bit 1
+    return 1;
+  }
+  else {
+    // Maioria de amostras baixas = bit 0
+    return 0;
+  }
+}
+
+// ===== FUNÇÃO: VERIFICA SE TRANSMISSÃO TERMINOU =====
+boolean isTransmissionComplete() {
+  // Amostra o sensor por 1 segundo sem atividade
+  long startTime = millis();
+  int samples = 0;
+  int lowSamples = 0;
+  
+  while (millis() - startTime < 1000) {
+    int sensorValue = analogRead(LIGHT_SENSOR_PIN);
+    
+    if (sensorValue < LIGHT_THRESHOLD) {
+      lowSamples++;
+    }
+    
+    samples++;
+    delay(50);
+  }
+  
+  // Se a maioria das amostras foi baixa, transmissão terminou
+  return (lowSamples > samples * 0.8);  // 80% sem luz = transmissão completa
+}
+
+/*
+ * ===== EXPLICAÇÃO DO ALGORITMO RECEPTOR NRZ-L =====
+ * 
+ * 1. RECEPÇÃO: O sensor lê a luz do LED durante 250ms (duração de 1 bit)
+ * 
+ * 2. AMOSTRAGEM:
+ *    - A cada 50ms, faz uma leitura do sensor (5 amostras por bit)
+ *    - Conta quantas amostras indicam "luz alta" (bit 1)
+ *    - Se > 50% das amostras = luz, então bit = 1
+ *    - Se < 50% das amostras = luz, então bit = 0
+ * 
+ * 3. RECONSTRUÇÃO DO BYTE:
+ *    - Recebe 8 bits em sequência (MSB primeiro)
+ *    - Monta o byte: 01000001 (exemplo: 'A')
+ *    - Converte para caractere ASCII
+ * 
+ * 4. DETECÇÃO DE FIM DE TRANSMISSÃO:
+ *    - Monitora 1 segundo sem mudança de luz
+ *    - Se 80% do tempo sem luz, considera transmissão encerrada
+ * 
+ * 5. CALIBRAÇÃO:
+ *    - IMPORTANTE: Ajuste LIGHT_THRESHOLD baseado na saída de calibração!
+ *    - Execute calibrateSensor() ao ligar
+ *    - Anote os valores mín/máx e escolha um limiar no meio
+ */
