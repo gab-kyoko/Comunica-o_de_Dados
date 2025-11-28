@@ -1,0 +1,146 @@
+/*
+ * ARDUINO EMISSOR - Codificação: NRZ-L (Non-Return-to-Zero-Level)
+ * NRZ-L: bit 0 = nível BAIXO (LED apagado) | bit 1 = nível ALTO (LED aceso)
+ */
+
+// ===== DEFINIÇÕES DE PINOS E CONSTANTES =====
+#define LED_PIN 13              // Pino do LED (digital 13)
+#define BIT_DURATION 250        // Duração de cada bit em milissegundos
+#define MAX_MESSAGE_LENGTH 64   // Máximo de caracteres na mensagem
+
+
+//__________ Variáveis locais__________
+String messageToSend = "";      // Mensagem a ser transmitida
+boolean isTransmitting = false; // Flag para controlar transmissão
+
+//_____ SETUP - Executado uma única vez no início_____
+void setup() 
+{
+
+  Serial.begin(9600);             // Inicializa comunicação serial (para entrada do usuário)
+  
+  pinMode(LED_PIN, OUTPUT);     // Configura o pino do LED como saída
+  digitalWrite(LED_PIN, LOW);   // Começa com LED apagado
+  
+  // Mensagem de boas-vindas
+  Serial.println("------------ ARDUINO EMISSOR - NRZ-L ------------");
+  Serial.println("Digite a mensagem a transmitir (máx 64 caracteres):");
+  Serial.println("Pressione ENTER para enviar");
+  Serial.println("----------------------------------------------------------------");
+}
+
+// ===== LOOP - Executado continuamente =====
+void loop() 
+{
+  // Se não está transmitindo, aguarda entrada do usuário
+  if (!isTransmitting) 
+  {
+    readUserMessage();
+  }
+  
+  // Se tem mensagem pronta, inicia a transmissão
+  if (messageToSend.length() > 0 && !isTransmitting) 
+  {
+    transmitMessage();
+    messageToSend = "";  // Limpa a mensagem após transmitir
+  }
+}
+
+//----- LER MENSAGEM DO USUÁRIO -----
+void readUserMessage() 
+{
+  // Verifica se há dados disponíveis na porta serial
+  if (Serial.available() > 0) 
+  {
+    String input = Serial.readStringUntil('\n');   // Lê até pressionar ENTER
+    input.trim();                                  // Remove espaços em branco
+    
+    // Valida o comprimento da mensagem
+    if (input.length() > 0 && input.length() <= MAX_MESSAGE_LENGTH) 
+    {
+      messageToSend = input;
+      Serial.print("Mensagem recebida: ");
+      Serial.println(messageToSend);
+      Serial.println("Iniciando transmissão em NRZ-L...\n");
+    } 
+    else if (input.length() > MAX_MESSAGE_LENGTH) 
+    {
+      Serial.println("ERRO: Mensagem muito longa! Máximo: 64 caracteres");
+      Serial.println("Digite novamente:");
+    }
+  }
+}
+
+//-----  TRANSMITIR MENSAGEM EM NRZ-L -----
+void transmitMessage() 
+{
+  isTransmitting = true;
+  
+  // Itera sobre cada caractere da mensagem
+  for (int i = 0; i < messageToSend.length(); i++) 
+  {
+    char currentChar = messageToSend[i];
+    
+    Serial.print("Transmitindo caractere: '");
+    Serial.print(currentChar);
+    Serial.print("' (ASCII: ");
+    Serial.print((int)currentChar);
+    Serial.println(")");
+    
+    // Transmite cada bit do caractere (8 bits = 1 byte)
+    // Começa do bit mais significativo (MSB = bit 7)
+    for (int bit = 7; bit >= 0; bit--) 
+    {
+      int bitValue = (currentChar >> bit) & 1;      // Extrai o bit atual: verifica se o bit está setado
+      
+      // NRZ-L: 0 = LOW, 1 = HIGH
+      if (bitValue == 0) 
+      {
+        digitalWrite(LED_PIN, LOW);   // LED apagado
+        Serial.print("0");
+      } 
+      else {
+        digitalWrite(LED_PIN, HIGH);  // LED aceso
+        Serial.print("1");
+      }
+      
+      // Mantém o nível pelo tempo de duração do bit
+      delay(BIT_DURATION);
+    }
+    
+    Serial.println();  // Nova linha após os 8 bits
+  }
+  
+  // Apaga o LED ao final da transmissão
+  digitalWrite(LED_PIN, LOW);
+  
+  Serial.println("\n_____________TRANSMISSÃO CONCLUÍDA _________________");
+  Serial.println("Digite a próxima mensagem:");
+  isTransmitting = false;
+
+}
+
+/*
+ * ===== EXPLICAÇÃO DO ALGORITMO NRZ-L =====
+ * 
+ * 1. ENTRADA: caractere 'A' (ASCII 65 = 01000001 em binário)
+ * 
+ * 2. TRANSMISSÃO BIT A BIT (MSB primeiro):
+ *    Bit 7: 0 → LED apagado por 250ms
+ *    Bit 6: 1 → LED aceso por 250ms
+ *    Bit 5: 0 → LED apagado por 250ms
+ *    Bit 4: 0 → LED apagado por 250ms
+ *    Bit 3: 0 → LED apagado por 250ms
+ *    Bit 2: 0 → LED apagado por 250ms
+ *    Bit 1: 0 → LED apagado por 250ms
+ *    Bit 0: 1 → LED aceso por 250ms
+ *    Total: 8 × 250ms = 2 segundos por caractere
+ * 
+ * 3. VANTAGEM DA NRZ-L:
+ *    - Simples de implementar
+ *    - Usa todo o tempo do bit para transmissão
+ * 
+ * 4. DESVANTAGEM:
+ *    - Sem transição (return-to-zero) entre bits
+ *    - Pode haver problemas de sincronismo em sequências longas de 0s ou 1s
+ */
